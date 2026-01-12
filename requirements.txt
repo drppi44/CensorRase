@@ -1,0 +1,6 @@
+PyNaCl==1.6.2
+py-cord==2.7.0
+vosk==0.3.44
+soundfile==0.13.1
+faster-whisper==1.2.1
+python-dotenv==1.2.1
