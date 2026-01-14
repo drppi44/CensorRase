@@ -1,7 +1,6 @@
 import time
 
 from discord import Intents
-from discord import sinks
 from discord.ext import commands
 from discord.sinks import WaveSink
 import asyncio
@@ -9,77 +8,70 @@ import asyncio
 from faster_whisper import WhisperModel
 
 import constants
-# from asr.whisper_engine import create_model
-from asr.whisper_engine import transcribe_whisper
+from asr.whisper_engine import create_model, transcribe_whisper
+from db.database import init_db
+from db.repository import insert_transcription
 import logging
 
 
 logging.basicConfig(level=logging.INFO)
 
-
 intents = Intents.default()
 intents.voice_states = True
-# intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 whisper_model: WhisperModel | None = None
+recording_finished = asyncio.Event()
 
-# Лічильник для кожного юзера
-# user_counter = {}
 
-async def record_loop(vc):
+@bot.event
+async def on_ready():
+    global whisper_model
+    
+    # Ініціалізувати БД
+    init_db()
+    
+    whisper_model = await asyncio.to_thread(
+        create_model,
+        model_path='models/faster-whisper-tiny',
+        device='cpu',
+        compute_type='int8'
+    )
+    logging.info("✅ Whisper model loaded")
+
+    channel = bot.get_channel(constants.DIS_VOICE_CHANNEL_ID)
+
+    await channel.connect()
+    logging.info("🔗 Connected to voice channel %s", {channel.name})
+
+    if (vc:= channel.guild.voice_client) and vc.is_connected():
+        logging.info("🔄 Starting recording loop...")
+        await record_loop(channel)
+
+
+async def record_loop(channel):
     """Безперервний цикл: пишемо чанки довжиною RECORD_DURATION_SECONDS."""
     while True:
-        sink = WaveSink()
-        vc.start_recording(sink, finished_callback)
-        await asyncio.sleep(0.5)  # Дати час Discord API запустити запис
+        vc = channel.guild.voice_client
+        recording_finished.clear()
+
+        vc.start_recording(WaveSink(), finished_callback)
         logging.info("🎤 Recording chunk started, talk!")
 
         # стільки секунд записуємо цей chunk
         await asyncio.sleep(constants.RECORD_DURATION_SECONDS)
 
         # тригерить finished_callback в іншому треді
-        # і одразу цикл продовжиться, стартуючи новий sink
         vc.stop_recording()
         logging.info("⏹️ Recording chunk stopped")
+        
+        # Почекати поки callback завершиться
+        await recording_finished.wait()
+        logging.info("✅ Callback finished, starting new cycle")
 
 
-@bot.event
-async def on_ready():
-    # global whisper_model
-    # whisper_model = await asyncio.to_thread(
-    #     create_model,
-    #     model_path='models/faster-whisper-tiny',
-    #     device='cpu',
-    #     compute_type='int8'
-    # )
-
-    logging.debug('✅ Getting the channel from config')
-    channel = bot.get_channel(constants.DIS_VOICE_CHANNEL_ID)
-    logging.debug('✅ On_ready: channel %s', channel.name)
-
-    await channel.connect()
-    logging.info("🔗 Connected to voice channel %s", {channel.name})
-
-    await asyncio.sleep(3)  # Дати Discord підʼєднатися  # TODO обовьязково чекати?
-    vc = channel.guild.voice_client
-    logging.debug('✅ Voice client %s' ,vc)
-
-    if vc and vc.is_connected():
-        # bot.loop.create_task(record_loop(vc))
-        logging.info("🔄 Starting recording loop...")
-        await record_loop(vc)
-
-
-
-# TODO: check tiny and base models. they are cpu less required as small one clocks async loop -> tiny the best
-# TODO: user_id.waw недостатньо, тре ще час враховувати для унікальності. можуть перетертися записи
-# TODO: записи повині постійно створюватись і відправлятись на перевірку. система не повина пропускати слова
-
-
-async def finished_callback(sink: sinks, *args):
+async def finished_callback(sink: WaveSink, *args):
     """Цей callback викликається в voice-треді, НЕ в async-коді."""
-    logging.debug('✅ finished_callback has been called!')
 
     for user_id, audio in sink.audio_data.items():
         # унікальне ім'я файлу (user + timestamp)
@@ -89,29 +81,37 @@ async def finished_callback(sink: sinks, *args):
             f.write(audio.file.getbuffer())
 
         # кинути корутину в event loop бота
-        # asyncio.run_coroutine_threadsafe(
-        #     process_user_audio(user_id, path),
-        #     bot.loop,
-        # )
+        asyncio.run_coroutine_threadsafe(
+            process_user_audio(user_id, path),
+            bot.loop,
+        )
+    
+    # Сигналізувати що callback завершився
+    bot.loop.call_soon_threadsafe(recording_finished.set)
 
-    # при бажанні почистити sink
-    # sink.cleanup()
 
+async def process_user_audio(user_id: int, path: str):
+    whisper_text = await asyncio.to_thread(
+        transcribe_whisper,
+        model=whisper_model,
+        path=path,
+        language='ru',
+    )
 
-# async def process_user_audio(user_id: int, path: str):
-#     whisper_text = await asyncio.to_thread(
-#         transcribe_whisper,
-#         model=whisper_model,
-#         path=path,
-#         language='ru',
-#     )
-#
-#     logging.info(f"USER {user_id}")
-#     logging.info("WHISPER: %s", whisper_text)
-#
-#     cnt_whisper = whisper_text.lower().count(constants.WORD)
-#     logging.info('Censored words: %s', cnt_whisper)
-
+    word_count = whisper_text.lower().count(constants.WORD)
+    
+    # Зберегти в БД
+    await asyncio.to_thread(
+        insert_transcription,
+        user_id=user_id,
+        text=whisper_text,
+        word_count=word_count
+    )
+    
+    logging.info("USER %s: %s | Censored words: %s",
+                 user_id,
+                 whisper_text,
+                 word_count)
 
 
 bot.run(constants.DIS_TOKEN)

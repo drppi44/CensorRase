@@ -4,3 +4,4 @@
 audio/temp/*
 .env
 test.py
+sqlite.db
