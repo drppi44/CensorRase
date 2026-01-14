@@ -23,7 +23,6 @@ CensorRace/
 │   ├── constants.py       # Configuration
 │   ├── asr/               # Whisper transcription
 │   ├── audio/temp/        # Temporary audio files
-│   ├── db/                # Database models
 │   └── models/            # Whisper model
 ├── api/                   # FastAPI backend
 │   └── main.py           # API endpoints
