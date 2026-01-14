@@ -1,9 +1,4 @@
-import logging
-import time
-
 from faster_whisper import WhisperModel
-
-from utils import timed
 
 
 def create_model(model_path: str, device: str, compute_type: str) -> WhisperModel:

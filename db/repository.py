@@ -1,7 +1,5 @@
 """Database repository functions."""
-from datetime import datetime
 from db.database import get_connection
-from db.models import Transcription
 
 
 def insert_transcription(user_id: int, text: str, word_count: int) -> int:

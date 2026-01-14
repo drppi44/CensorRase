@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  bot:
+    build: ./bot
+    container_name: censorrace-bot
+    network_mode: host
+    volumes:
+      - ./sqlite.db:/app/sqlite.db
+      - ./db:/app/db
+      - ./bot/models:/app/models
+      - ./bot/audio:/app/audio
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    container_name: censorrace-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./sqlite.db:/app/sqlite.db
+      - ./db:/app/db
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: censorrace-frontend
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    depends_on:
+      - api

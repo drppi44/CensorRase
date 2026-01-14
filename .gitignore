@@ -1,7 +1,7 @@
-.venv/
-.idea/
-*.pyc
-audio/temp/*
-.env
-test.py
 sqlite.db
+*.pyc
+__pycache__/
+.env
+bot/audio/temp/*.wav
+.DS_Store
+.idea/
